@@ -1,46 +1,42 @@
-import numpy as np
-import matplotlib.pyplot as plt
-from keras.layers import Dense, Flatten, LeakyReLU, BatchNormalization, Reshape
-from keras.optimizers import Adam, SGD
-from keras.models import Model, Sequential
 from keras.datasets import mnist
+from keras.layers import Input, Dense, Reshape, Activation, Flatten, Dropout, BatchNormalization, ReLU, LeakyReLU, ZeroPadding2D, Conv2D, UpSampling2D, MaxPooling2D
+from keras.models import Sequential, Model
+from keras.optimizers import Adam, SGD
 from keras.losses import BinaryCrossentropy
-from keras.regularizers import l2
+import matplotlib.pyplot as plt
+import numpy as np
 import argparse
 
-img_shape = (28, 28, 1) # shape of image
-LEARNING_RATE = 0.0002 # learning rate of the model
+img_shape = (28, 28, 1) # shape of the image
+EPOCHS = 150 # number of epochs for which the model is trained
+BATCH_SIZE = 128 # number of samples to process per minibatch during training
+LATENT_DIM = 100 # dimension of the latent space from which images are genrated
+LEARNING_RATE = 0.0001 # learning rate for the optimizer
 adam = Adam(LEARNING_RATE, 0.5) # adam optimizer
 sgd = SGD(LEARNING_RATE, momentum = 0.9) # sgd optimizer
-LATENT_DIM = 128 # dimension of the latent space
-EPOCHS = 100 # number of epochs for which the model is trained
-BATCH_SIZE = 128 # number of samples to process per minibatch during training
-OPTIMIZER = adam # optimizer for the model
-WEIGHT_DECAY = 0 # magnitude of weight decay
+OPTIMIZER = adam # optimizer for training the model
 
 # function to get the arguments
 def get_arguments():
 
-    parser = argparse.ArgumentParser("Generative Adverserial Network for generating handwritten digits using MNIST dataset")
+    parser = argparse.ArgumentParser("DCGAN model for generating handwritten digits using MNIST dataset.")
     parser.add_argument("--e", type = int, metavar = "Epochs", default = EPOCHS, help = "Number of epochs for which the model is trained")
-    parser.add_argument("--bs", type =  int, metavar = "Batch Size", default = BATCH_SIZE, help = "Number of samples to process per minibatch during training")
-    parser.add_argument("--lr", type = float, metavar = "Learning Rate", default = LEARNING_RATE, help = "Learning Rate for Adam optimizer")
+    parser.add_argument("--bs", type = int, metavar = "Batch Size", default = BATCH_SIZE, help = "Number of samples to process per minibatch during training")
+    parser.add_argument("--lr", type = float, metavar = "Learning Rate", default = LEARNING_RATE, help = "Learning Rate for optimizer")
     parser.add_argument("--ld", type = int, metavar = "Latent Dimension", default = LATENT_DIM, help = "Dimension of the latent space from which images are generated")
     parser.add_argument("--opt", type = str, metavar = "Optimizer", default = OPTIMIZER, help = "Optimizer for training the model. Either 'adam' or 'sgd'")
-    parser.add_argument("--wd", type = float, metavar = "Weight Decay", default = WEIGHT_DECAY, help = "Weight decay using l2 regularizer")
     return parser.parse_args()
 
 # function to assign the arguments to the variables
 def get_hyperparameters():
+
     args = get_arguments()
-    global LATENT_DIM, SAVE_INTERVAL, EPOCHS, LEARNING_RATE, BATCH_SIZE, WEIGHT_DECAY, adam, sgd
+    global LATENT_DIM, SAVE_INTERVAL, EPOCHS, LEARNING_RATE, BATCH_SIZE, adam, sgd
     LATENT_DIM = args.ld
     EPOCHS = args.e
     LEARNING_RATE = args.lr
     BATCH_SIZE = args.bs
-    WEIGHT_DECAY = args.wd
 
-    # checking if the optimizer input is valid
     if args.opt == "adam":
         OPTIMIZER = adam
     elif args.opt == "sgd":
@@ -48,59 +44,55 @@ def get_hyperparameters():
     else:
         print("Invalid input for Optimizer, using default optimizer.")
 
-# function to define the generator
+# function to define the generator model
 def get_generator():
 
     model = Sequential()
 
-    # first block. input dimension: LATENT_DIM      output dimension: 128
-    model.add(Dense(128, input_dim = LATENT_DIM, kernel_regularizer = l2(WEIGHT_DECAY)))
-    model.add(LeakyReLU(alpha = 0.2))
-    model.add(BatchNormalization(momentum = 0.8))
+    # output dimension: (7, 7, 256)
+    model.add(Dense(256*7*7, input_dim=LATENT_DIM))
+    model.add(BatchNormalization())
+    model.add(Activation("relu"))
+    model.add(Reshape((7, 7, 256)))
 
-    # second block. input dimension: 128    output dimension: 256
-    model.add(Dense(256, kernel_regularizer = l2(WEIGHT_DECAY)))
-    model.add(LeakyReLU(alpha = 0.2))
-    model.add(BatchNormalization(momentum = 0.8))
+    # output dimension: (7, 7, 128)
+    model.add(Conv2D(128, (5, 5), padding = "same"))
+    model.add(BatchNormalization())
+    model.add(Activation("relu"))
 
-    # third block. input dimension: 256     output dimension: 512
-    model.add(Dense(512, kernel_regularizer = l2(WEIGHT_DECAY)))
-    model.add(LeakyReLU(alpha = 0.2))
-    model.add(BatchNormalization(momentum = 0.8))
+    # output dimension: (14, 14, 64)
+    model.add(UpSampling2D())
+    model.add(Conv2D(64, (5, 5), padding = "same"))
+    model.add(BatchNormalization())
+    model.add(Activation("relu"))
 
-    # fourth block. input dimension: 512    output dimension: 1024
-    model.add(Dense(1024, kernel_regularizer = l2(WEIGHT_DECAY)))
-    model.add(LeakyReLU(alpha = 0.2))
-    model.add(BatchNormalization(momentum = 0.8))
-
-    # final block. input dimension: 1024    output dimension: 784
-    model.add(Dense(np.prod(img_shape), activation = "sigmoid", kernel_regularizer = l2(WEIGHT_DECAY)))
-    model.add(Reshape(img_shape))
+    # output dimension: (28, 28, 1)
+    model.add(UpSampling2D())
+    model.add(Conv2D(1, (5, 5), padding = "same"))
+    model.add(Activation("tanh"))
 
     return model
 
-# funciton to define the discriminator
+# function to define the discriminator model
 def get_discriminator():
 
     model = Sequential()
 
-    # converts from 3-dimension to 1-dimension
-    model.add(Flatten(input_shape = img_shape))
+    # output dimension: (14, 14, 64)
+    model.add(Conv2D(64, (5, 5), padding = "same", strides = (2, 2), input_shape = img_shape)
+    model.add(LeakyReLU())
+    model.add(Dropout(0.5))
 
-    # first block. input dimension: 784     output dimension: 512
-    model.add(Dense(512, kernel_regularizer = l2(WEIGHT_DECAY)))
-    model.add(LeakyReLU(alpha = 0.2))
+    # output dimension: (7, 7, 128)
+    model.add(Conv2D(128, (5, 5), padding = "same", strides = (1, 1)))
+    model.add(LeakyReLU())
+    model.add(Dropout(0.5))
 
-    # second block. input dimension: 512    output dimension: 256
-    model.add(Dense(256, kernel_regularizer = l2(WEIGHT_DECAY)))
-    model.add(LeakyReLU(alpha = 0.2))
+    # output dimension: (7*7*128)
+    model.add(Flatten())
 
-    # third block. input dimension: 256     output dimension: 128
-    model.add(Dense(128, kernel_regularizer = l2(WEIGHT_DECAY)))
-    model.add(LeakyReLU(alpha = 0.2))
-
-    # final block. input dimension: 128     output dimension: 1
-    model.add(Dense(1, activation = "sigmoid", kernel_regularizer = l2(WEIGHT_DECAY)))
+    # output size: (1)
+    model.add(Dense(1, activation = "sigmoid"))
 
     model.compile(loss = BinaryCrossentropy(), optimizer = OPTIMIZER, metrics = ["accuracy"])
     return model
@@ -108,10 +100,8 @@ def get_discriminator():
 # function to define the gan model
 def get_gan(gen, disc):
 
-    # disabling the training of the model
     disc.trainable = False
 
-    # combining the generator and discriminator model
     model = Sequential()
     model.add(gen)
     model.add(disc)
@@ -119,7 +109,7 @@ def get_gan(gen, disc):
     model.compile(loss = BinaryCrossentropy(), optimizer = OPTIMIZER)
     return model
 
-# function to load data
+# function to load the data
 def get_data():
 
     (X_train, _), (_, _) = mnist.load_data()
