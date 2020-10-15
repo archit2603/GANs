@@ -9,12 +9,11 @@ from keras.regularizers import l2
 import argparse
 
 img_shape = (28, 28, 1) # shape of image
-LEARNING_RATE = 0.001 # learning rate of the model
+LEARNING_RATE = 0.0002 # learning rate of the model
 adam = Adam(LEARNING_RATE, 0.5) # adam optimizer
 sgd = SGD(LEARNING_RATE, momentum = 0.9) # sgd optimizer
 LATENT_DIM = 128 # dimension of the latent space
-SAVE_INTERVAL = 500 # number of epochs after which an image is saved
-EPOCHS = 20000 # number of epochs for which the model is trained
+EPOCHS = 100 # number of epochs for which the model is trained
 BATCH_SIZE = 128 # number of samples to process per minibatch during training
 OPTIMIZER = adam # optimizer for the model
 WEIGHT_DECAY = 0 # magnitude of weight decay
@@ -27,7 +26,6 @@ def get_arguments():
     parser.add_argument("--bs", type =  int, metavar = "Batch Size", default = BATCH_SIZE, help = "Number of samples to process per minibatch during training")
     parser.add_argument("--lr", type = float, metavar = "Learning Rate", default = LEARNING_RATE, help = "Learning Rate for Adam optimizer")
     parser.add_argument("--ld", type = int, metavar = "Latent Dimension", default = LATENT_DIM, help = "Dimension of the latent space from which images are generated")
-    parser.add_argument("--si", type = int, metavar = "Save Interval", default = SAVE_INTERVAL, help = "Number of epochs after which images and generator model is saved")
     parser.add_argument("--opt", type = str, metavar = "Optimizer", default = OPTIMIZER, help = "Optimizer for training the model. Either 'adam' or 'sgd'")
     parser.add_argument("--wd", type = float, metavar = "Weight Decay", default = WEIGHT_DECAY, help = "Weight decay using l2 regularizer")
     return parser.parse_args()
@@ -35,9 +33,8 @@ def get_arguments():
 # function to assign the arguments to the variables
 def get_hyperparameters():
     args = get_arguments()
-    global LATENT_DIM, SAVE_INTERVAL, EPOCHS, LEARNING_RATE, BATCH_SIZE, adam, sgd
+    global LATENT_DIM, SAVE_INTERVAL, EPOCHS, LEARNING_RATE, BATCH_SIZE, WEIGHT_DECAY, adam, sgd
     LATENT_DIM = args.ld
-    SAVE_INTERVAL = args.si
     EPOCHS = args.e
     LEARNING_RATE = args.lr
     BATCH_SIZE = args.bs
@@ -128,6 +125,7 @@ def get_data():
     (X_train, _), (_, _) = mnist.load_data()
     X_train = X_train / 255.0
     X_train = np.expand_dims(X_train, axis = -1)
+    np.random.shuffle(X_train)
 
     return X_train
 
@@ -159,6 +157,33 @@ def save_image_generator(gen, epoch):
 
     gen.save("generators/generator_%d.h5"%epoch) # save the generator model
 
+# function to train a single minibatch
+def train_batch(disc, gen, gan, imgs):
+
+    valid = np.ones((BATCH_SIZE, 1))
+    fake = np.zeros((BATCH_SIZE, 1))
+
+    noise = np.random.normal(0, 1, (BATCH_SIZE, LATENT_DIM)) # noise matrix
+    gen_imgs = gen.predict(noise) # generating images from the generator
+
+    # evaluating the discriminator model
+    disc_loss_real = disc.train_on_batch(imgs, valid)
+    disc_loss_fake = disc.train_on_batch(gen_imgs, fake)
+    disc_loss = 0.5 * np.add(disc_loss_real, disc_loss_fake)
+
+    # evaluating the generator model
+    gen_loss = gan.train_on_batch(noise, valid)
+
+    dict = {
+    "disc" : disc,
+    "gen" : gen,
+    "gan" : gan,
+    "disc_loss" : disc_loss,
+    "gen_loss" : gen_loss
+    }
+
+    return dict
+
 # function to train the model
 def train():
 
@@ -170,31 +195,32 @@ def train():
     gen.summary()
     gan.summary()
 
-    valid = np.ones((BATCH_SIZE, 1)) # labels for the real images
-    fake = np.zeros((BATCH_SIZE, 1)) # labels for the fake images
-
     for epoch in range(1, EPOCHS+1):
 
-        # sampling images randomly from the dataset
-        idxs = np.random.randint(0, X.shape[0], BATCH_SIZE)
-        imgs = X[idxs]
+        # mean generator and mean discriminator loss for one epoch
+        mean_gen_loss = 0
+        mean_disc_loss = 0
 
-        noise = np.random.normal(0, 1, (BATCH_SIZE, LATENT_DIM)) # noise matrix
-        gen_imgs = gen.predict(noise) # generating images from the generator
+        for i in range(60000 // BATCH_SIZE):
 
-        # evaluating the model
-        disc_loss_real = disc.train_on_batch(imgs, valid)
-        disc_loss_fake = disc.train_on_batch(gen_imgs, fake)
-        disc_loss = 0.5 * np.add(disc_loss_real, disc_loss_fake)
+            # taking batches of images from X
+            idxs = np.arange(i*BATCH_SIZE, (i+1)*BATCH_SIZE)
+            img_batch = X[idxs]
 
-        noise = np.random.normal(0, 1, (BATCH_SIZE, LATENT_DIM)) # noise matrix
+            dict = train_batch(disc, gen, gan, img_batch)
 
-        # evaluating the model
-        gen_loss = gan.train_on_batch(noise, valid)
+            disc = dict["disc"]
+            gen = dict["gen"]
+            gan = dict["gan"]
 
-        print("%d [D loss: %f, acc: %.2f%%] [G loss: %f]"%(epoch, disc_loss[0], disc_loss[1]*100, gen_loss))
+            mean_gen_loss += dict["gen_loss"]
+            mean_disc_loss += dict["disc_loss"]
 
-        if epoch % SAVE_INTERVAL == 0:
-            save_image_generator(gen, epoch)
+        mean_gen_loss /= (60000 // BATCH_SIZE)
+        mean_disc_loss /= (60000 // BATCH_SIZE)
+
+        print("%d [D loss: %f, acc: %.2f%%] [G loss: %f]"%(epoch, mean_disc_loss[0], mean_disc_loss[1]*100, mean_gen_loss))
+
+        save_image_generator(gen, epoch)
 
 train()
