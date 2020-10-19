@@ -26,27 +26,18 @@ def get_arguments():
     parser.add_argument("--bs", type =  int, metavar = "Batch Size", default = BATCH_SIZE, help = "Number of samples to process per minibatch during training")
     parser.add_argument("--lr", type = float, metavar = "Learning Rate", default = LEARNING_RATE, help = "Learning Rate for Adam optimizer")
     parser.add_argument("--ld", type = int, metavar = "Latent Dimension", default = LATENT_DIM, help = "Dimension of the latent space from which images are generated")
-    parser.add_argument("--opt", type = str, metavar = "Optimizer", default = OPTIMIZER, help = "Optimizer for training the model. Either 'adam' or 'sgd'")
     parser.add_argument("--wd", type = float, metavar = "Weight Decay", default = WEIGHT_DECAY, help = "Weight decay using l2 regularizer")
     return parser.parse_args()
 
 # function to assign the arguments to the variables
 def get_hyperparameters():
     args = get_arguments()
-    global LATENT_DIM, SAVE_INTERVAL, EPOCHS, LEARNING_RATE, BATCH_SIZE, WEIGHT_DECAY, adam, sgd
+    global LATENT_DIM, EPOCHS, LEARNING_RATE, BATCH_SIZE, WEIGHT_DECAY
     LATENT_DIM = args.ld
     EPOCHS = args.e
     LEARNING_RATE = args.lr
     BATCH_SIZE = args.bs
     WEIGHT_DECAY = args.wd
-
-    # checking if the optimizer input is valid
-    if args.opt == "adam":
-        OPTIMIZER = adam
-    elif args.opt == "sgd":
-        OPTIMIZER = sgd
-    else:
-        print("Invalid input for Optimizer, using default optimizer.")
 
 # function to define the generator
 def get_generator():
